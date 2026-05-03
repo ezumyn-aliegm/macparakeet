@@ -295,7 +295,7 @@ macparakeet/
 │   └── hermes/README.md
 ├── brand-assets/       # Vector marks, Pop palette, poster compositions, raster exports
 │   ├── README.md       # Library guide and philosophy
-│   ├── marks/          # parakeet-line.svg + parakeet-fill.svg
+│   ├── marks/          # parakeet-line.svg (canonical recolorable line mark)
 │   ├── palette/        # palette.json/css/svg/png
 │   ├── compositions/   # Reusable SVG layouts (Warhol grid, OG, social, lockup)
 │   ├── exports/        # Ready-to-grab PNG renders
