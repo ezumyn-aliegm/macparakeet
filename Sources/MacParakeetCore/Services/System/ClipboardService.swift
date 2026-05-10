@@ -204,7 +204,9 @@ public final class ClipboardService: ClipboardServiceProtocol {
             eventPosting: CGClipboardEventPosting(),
             clipboardRestoreDelay: Self.defaultClipboardRestoreDelay,
             restoreCoordinator: Self.sharedRestoreCoordinator,
-            pasteboardStringWriter: Self.writeString
+            pasteboardStringWriter: { pasteboard, text in
+                pasteboard.setString(text, forType: .string)
+            }
         )
     }
 
@@ -214,7 +216,9 @@ public final class ClipboardService: ClipboardServiceProtocol {
         eventPosting: ClipboardEventPosting = CGClipboardEventPosting(),
         clipboardRestoreDelay: TimeInterval = ClipboardService.defaultClipboardRestoreDelay,
         restoreAttemptObserver: (@MainActor () -> Void)? = nil,
-        pasteboardStringWriter: @escaping @MainActor (NSPasteboard, String) -> Bool = ClipboardService.writeString
+        pasteboardStringWriter: @escaping @MainActor (NSPasteboard, String) -> Bool = { pasteboard, text in
+            pasteboard.setString(text, forType: .string)
+        }
     ) {
         self.init(
             pasteboard: pasteboard,
@@ -356,7 +360,4 @@ public final class ClipboardService: ClipboardServiceProtocol {
         }
     }
 
-    private static func writeString(to pasteboard: NSPasteboard, text: String) -> Bool {
-        pasteboard.setString(text, forType: .string)
-    }
 }
