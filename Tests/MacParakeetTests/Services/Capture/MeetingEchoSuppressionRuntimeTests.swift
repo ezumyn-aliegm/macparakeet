@@ -8,8 +8,8 @@ final class MeetingEchoSuppressionRuntimeTests: XCTestCase {
             MeetingEchoSuppressionConfiguration.libraryPathEnvironmentKey: "/tmp/libecho.dylib",
             MeetingEchoSuppressionConfiguration.modelPathEnvironmentKey: "file:///tmp/model.gguf",
             MeetingEchoSuppressionConfiguration.modelSHA256EnvironmentKey: " ABC123 ",
-            MeetingEchoSuppressionConfiguration.sampleRateEnvironmentKey: "48000",
-            MeetingEchoSuppressionConfiguration.frameSizeEnvironmentKey: "256",
+            MeetingEchoSuppressionConfiguration.sampleRateEnvironmentKey: " 48000 ",
+            MeetingEchoSuppressionConfiguration.frameSizeEnvironmentKey: " 256 ",
         ])
 
         XCTAssertEqual(configuration.mode, .dynamicLibrary)
@@ -18,6 +18,21 @@ final class MeetingEchoSuppressionRuntimeTests: XCTestCase {
         XCTAssertEqual(configuration.modelSHA256, "abc123")
         XCTAssertEqual(configuration.sampleRate, 48_000)
         XCTAssertEqual(configuration.frameSize, 256)
+    }
+
+    func testDefaultFrameSizeMatchesLocalVQEHopLengthFallback() {
+        let configuration = MeetingEchoSuppressionConfiguration()
+
+        XCTAssertEqual(configuration.frameSize, 256)
+    }
+
+    func testConfigurationParsesUnescapedFileURLWithSpaces() {
+        let configuration = MeetingEchoSuppressionConfiguration.fromEnvironment([
+            MeetingEchoSuppressionConfiguration.modelPathEnvironmentKey:
+                "file:///tmp/meeting echo/local model.gguf",
+        ])
+
+        XCTAssertEqual(configuration.modelURL?.path, "/tmp/meeting echo/local model.gguf")
     }
 
     func testAutomaticWithoutAssetsUsesLoadedPassthrough() {

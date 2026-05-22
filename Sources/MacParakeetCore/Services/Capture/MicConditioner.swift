@@ -34,7 +34,7 @@ protocol MeetingEchoSuppressing: AnyObject, Sendable {
     var sampleRate: Int { get }
     var frameSize: Int { get }
     func reset()
-    func processFrame(microphone: [Float], reference: [Float]) throws -> [Float]
+    func processFrame(microphone: [Float], reference: [Float], output: inout [Float]) throws
 }
 
 protocol MicConditioning: AnyObject, Sendable {
@@ -55,12 +55,19 @@ extension MicConditioning {
 final class PassthroughMicConditioner: MicConditioning, @unchecked Sendable {
     private let processorName: String
     private let loaded: Bool
-    private(set) var diagnostics: MeetingEchoSuppressionDiagnostics
+    private let lock = NSLock()
+    private var diagnosticsStorage: MeetingEchoSuppressionDiagnostics
+
+    var diagnostics: MeetingEchoSuppressionDiagnostics {
+        lock.lock()
+        defer { lock.unlock() }
+        return diagnosticsStorage
+    }
 
     init(processorName: String = "passthrough", loaded: Bool = true) {
         self.processorName = processorName
         self.loaded = loaded
-        self.diagnostics = MeetingEchoSuppressionDiagnostics.passthrough(
+        self.diagnosticsStorage = MeetingEchoSuppressionDiagnostics.passthrough(
             processorName: processorName,
             loaded: loaded
         )
@@ -71,7 +78,9 @@ final class PassthroughMicConditioner: MicConditioning, @unchecked Sendable {
     }
 
     func reset() {
-        diagnostics = MeetingEchoSuppressionDiagnostics.passthrough(
+        lock.lock()
+        defer { lock.unlock() }
+        diagnosticsStorage = MeetingEchoSuppressionDiagnostics.passthrough(
             processorName: processorName,
             loaded: loaded
         )
@@ -80,11 +89,18 @@ final class PassthroughMicConditioner: MicConditioning, @unchecked Sendable {
 
 final class StreamingMeetingEchoSuppressor: MicConditioning, @unchecked Sendable {
     private let processor: any MeetingEchoSuppressing
-    private(set) var diagnostics: MeetingEchoSuppressionDiagnostics
+    private let lock = NSLock()
+    private var diagnosticsStorage: MeetingEchoSuppressionDiagnostics
+
+    var diagnostics: MeetingEchoSuppressionDiagnostics {
+        lock.lock()
+        defer { lock.unlock() }
+        return diagnosticsStorage
+    }
 
     init(processor: any MeetingEchoSuppressing) {
         self.processor = processor
-        self.diagnostics = MeetingEchoSuppressionDiagnostics(
+        self.diagnosticsStorage = MeetingEchoSuppressionDiagnostics(
             processorName: processor.name,
             loaded: true,
             micFrames: 0,
@@ -103,44 +119,50 @@ final class StreamingMeetingEchoSuppressor: MicConditioning, @unchecked Sendable
         let frameSize = max(processor.frameSize, 1)
         var output: [Float] = []
         output.reserveCapacity(microphone.count)
+        var micFrame = [Float](repeating: 0, count: frameSize)
+        var referenceFrame = [Float](repeating: 0, count: frameSize)
+        var processedFrame = [Float](repeating: 0, count: frameSize)
 
+        lock.lock()
+        defer { lock.unlock() }
         var cursor = 0
         while cursor + frameSize <= microphone.count {
-            let micFrame = Array(microphone[cursor..<(cursor + frameSize)])
-            let referenceFrame = makeReferenceFrame(
+            copyFrame(from: microphone, start: cursor, into: &micFrame)
+            let referenceQuality = fillReferenceFrame(
+                &referenceFrame,
                 speaker: speaker,
                 start: cursor,
-                count: frameSize,
                 hasSpeakerReference: hasSpeakerReference
             )
 
-            diagnostics.micFrames += 1
-            switch referenceFrame.quality {
+            diagnosticsStorage.micFrames += 1
+            switch referenceQuality {
             case .full:
-                diagnostics.fullReferenceFrames += 1
+                diagnosticsStorage.fullReferenceFrames += 1
             case .partial:
-                diagnostics.partialReferenceFrames += 1
+                diagnosticsStorage.partialReferenceFrames += 1
             case .missing:
-                diagnostics.missingReferenceFrames += 1
+                diagnosticsStorage.missingReferenceFrames += 1
             }
 
             do {
-                let processed = try processor.processFrame(
+                try processor.processFrame(
                     microphone: micFrame,
-                    reference: referenceFrame.samples
+                    reference: referenceFrame,
+                    output: &processedFrame
                 )
-                if processed.count == frameSize {
-                    output.append(contentsOf: processed)
-                    diagnostics.processedFrames += 1
+                if processedFrame.count == frameSize {
+                    output.append(contentsOf: processedFrame)
+                    diagnosticsStorage.processedFrames += 1
                 } else {
                     output.append(contentsOf: micFrame)
-                    diagnostics.rawFallbackFrames += 1
-                    diagnostics.processingFailures += 1
+                    diagnosticsStorage.rawFallbackFrames += 1
+                    diagnosticsStorage.processingFailures += 1
                 }
             } catch {
                 output.append(contentsOf: micFrame)
-                diagnostics.rawFallbackFrames += 1
-                diagnostics.processingFailures += 1
+                diagnosticsStorage.rawFallbackFrames += 1
+                diagnosticsStorage.processingFailures += 1
             }
 
             cursor += frameSize
@@ -148,15 +170,17 @@ final class StreamingMeetingEchoSuppressor: MicConditioning, @unchecked Sendable
 
         if cursor < microphone.count {
             output.append(contentsOf: microphone[cursor...])
-            diagnostics.rawFallbackFrames += 1
+            diagnosticsStorage.rawFallbackFrames += 1
         }
 
         return output
     }
 
     func reset() {
+        lock.lock()
+        defer { lock.unlock() }
         processor.reset()
-        diagnostics = MeetingEchoSuppressionDiagnostics(
+        diagnosticsStorage = MeetingEchoSuppressionDiagnostics(
             processorName: processor.name,
             loaded: true,
             micFrames: 0,
@@ -175,27 +199,45 @@ final class StreamingMeetingEchoSuppressor: MicConditioning, @unchecked Sendable
         case missing
     }
 
-    private func makeReferenceFrame(
+    private func copyFrame(
+        from samples: [Float],
+        start: Int,
+        into frame: inout [Float]
+    ) {
+        for offset in frame.indices {
+            frame[offset] = samples[start + offset]
+        }
+    }
+
+    private func fillReferenceFrame(
+        _ frame: inout [Float],
         speaker: [Float],
         start: Int,
-        count: Int,
         hasSpeakerReference: Bool
-    ) -> (samples: [Float], quality: ReferenceQuality) {
-        guard hasSpeakerReference, !speaker.isEmpty, start < speaker.count else {
-            return ([Float](repeating: 0, count: count), .missing)
+    ) -> ReferenceQuality {
+        for index in frame.indices {
+            frame[index] = 0
         }
 
-        if start + count <= speaker.count {
-            return (Array(speaker[start..<(start + count)]), .full)
+        guard hasSpeakerReference, !speaker.isEmpty, start < speaker.count else {
+            return .missing
+        }
+
+        if start + frame.count <= speaker.count {
+            for offset in frame.indices {
+                frame[offset] = speaker[start + offset]
+            }
+            return .full
         }
 
         let available = speaker.count - start
         guard available > 0 else {
-            return ([Float](repeating: 0, count: count), .missing)
+            return .missing
         }
 
-        var frame = [Float](repeating: 0, count: count)
-        frame.replaceSubrange(0..<available, with: speaker[start..<speaker.count])
-        return (frame, .partial)
+        for offset in 0..<available {
+            frame[offset] = speaker[start + offset]
+        }
+        return .partial
     }
 }

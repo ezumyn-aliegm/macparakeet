@@ -1,6 +1,7 @@
 import CryptoKit
 import Darwin
 import Foundation
+import OSLog
 
 public enum MeetingEchoSuppressionMode: String, Sendable, Equatable {
     case automatic
@@ -17,7 +18,7 @@ public struct MeetingEchoSuppressionConfiguration: Sendable, Equatable {
     public static let sampleRateEnvironmentKey = "MACPARAKEET_MEETING_ECHO_SAMPLE_RATE"
 
     public static let defaultSampleRate = 16_000
-    public static let defaultFrameSize = 512
+    public static let defaultFrameSize = 256
 
     public var mode: MeetingEchoSuppressionMode
     public var libraryURL: URL?
@@ -57,9 +58,9 @@ public struct MeetingEchoSuppressionConfiguration: Sendable, Equatable {
                 return trimmed.isEmpty ? nil : trimmed
             }
         let sampleRate = environment[sampleRateEnvironmentKey]
-            .flatMap(Int.init) ?? defaultSampleRate
+            .flatMap(Self.integerValue(from:)) ?? defaultSampleRate
         let frameSize = environment[frameSizeEnvironmentKey]
-            .flatMap(Int.init) ?? defaultFrameSize
+            .flatMap(Self.integerValue(from:)) ?? defaultFrameSize
 
         return MeetingEchoSuppressionConfiguration(
             mode: mode,
@@ -74,10 +75,17 @@ public struct MeetingEchoSuppressionConfiguration: Sendable, Equatable {
     private static func fileURL(from value: String) -> URL? {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
-        if trimmed.hasPrefix("file://"), let url = URL(string: trimmed) {
-            return url
+        if trimmed.lowercased().hasPrefix("file://") {
+            if let url = URL(string: trimmed), url.isFileURL {
+                return url
+            }
+            return URL(fileURLWithPath: String(trimmed.dropFirst("file://".count)))
         }
         return URL(fileURLWithPath: trimmed)
+    }
+
+    private static func integerValue(from value: String) -> Int? {
+        Int(value.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 }
 
@@ -101,6 +109,10 @@ enum MeetingEchoSuppressionFactory {
     static let defaultLibraryName = "liblocalvqe.dylib"
     static let defaultModelDirectoryName = "MeetingEchoSuppression"
     static let defaultModelName = "localvqe-v1.2-1.3M-f32.gguf"
+    private static let logger = Logger(
+        subsystem: "com.macparakeet.core",
+        category: "MeetingEchoSuppression"
+    )
 
     static func makeConditioner(
         configuration: MeetingEchoSuppressionConfiguration,
@@ -129,7 +141,7 @@ enum MeetingEchoSuppressionFactory {
                 bundle: bundle,
                 fileManager: fileManager
             ) else {
-                return unavailableDynamicConditioner()
+                return unavailableDynamicConditioner(reason: "assets_missing")
             }
             return makeDynamicConditioner(
                 resolved: resolved,
@@ -140,8 +152,15 @@ enum MeetingEchoSuppressionFactory {
     }
 
     static func sha256Hex(for url: URL) throws -> String {
-        let data = try Data(contentsOf: url)
-        let digest = SHA256.hash(data: data)
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+
+        var hasher = SHA256()
+        while let data = try handle.read(upToCount: 1024 * 1024), !data.isEmpty {
+            hasher.update(data: data)
+        }
+
+        let digest = hasher.finalize()
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 
@@ -197,14 +216,14 @@ enum MeetingEchoSuppressionFactory {
             if let expectedSHA = configuration.modelSHA256 {
                 let actualSHA = try sha256Hex(for: resolved.modelURL)
                 guard actualSHA.caseInsensitiveCompare(expectedSHA) == .orderedSame else {
-                    return unavailableDynamicConditioner()
+                    return unavailableDynamicConditioner(reason: "checksum_mismatch")
                 }
             }
 
             guard fileManager.isReadableFile(atPath: resolved.libraryURL.path),
                   fileManager.isReadableFile(atPath: resolved.modelURL.path)
             else {
-                return unavailableDynamicConditioner()
+                return unavailableDynamicConditioner(reason: "assets_not_readable")
             }
 
             let processor = try DynamicLibraryMeetingEchoProcessor(
@@ -215,12 +234,24 @@ enum MeetingEchoSuppressionFactory {
             )
             return StreamingMeetingEchoSuppressor(processor: processor)
         } catch {
-            return unavailableDynamicConditioner()
+            return unavailableDynamicConditioner(reason: "load_failed", error: error)
         }
     }
 
-    private static func unavailableDynamicConditioner() -> any MicConditioning {
-        PassthroughMicConditioner(processorName: processorName, loaded: false)
+    private static func unavailableDynamicConditioner(
+        reason: String,
+        error: (any Error)? = nil
+    ) -> any MicConditioning {
+        if let error {
+            logger.warning(
+                "meeting_echo_processor_unavailable reason=\(reason, privacy: .public) error=\(String(describing: error), privacy: .private)"
+            )
+        } else {
+            logger.warning(
+                "meeting_echo_processor_unavailable reason=\(reason, privacy: .public)"
+            )
+        }
+        return PassthroughMicConditioner(processorName: processorName, loaded: false)
     }
 }
 
@@ -229,7 +260,7 @@ private enum DynamicLibraryMeetingEchoProcessorError: Error, CustomStringConvert
     case missingSymbol(String)
     case createFailed(String)
     case invalidFrameSize(expected: Int, microphone: Int, reference: Int)
-    case processingFailed(Int32)
+    case processingFailed(code: Int32, message: String)
 
     var description: String {
         switch self {
@@ -241,8 +272,8 @@ private enum DynamicLibraryMeetingEchoProcessorError: Error, CustomStringConvert
             return "create failed: \(message)"
         case let .invalidFrameSize(expected, microphone, reference):
             return "invalid frame size: expected=\(expected) microphone=\(microphone) reference=\(reference)"
-        case .processingFailed(let code):
-            return "processing failed: \(code)"
+        case let .processingFailed(code, message):
+            return "processing failed: code=\(code) message=\(message)"
         }
     }
 }
@@ -275,7 +306,11 @@ final class DynamicLibraryMeetingEchoProcessor: MeetingEchoSuppressing, @uncheck
     private let lock = NSLock()
 
     init(libraryURL: URL, modelURL: URL, sampleRate: Int, frameSize: Int) throws {
-        guard let handle = dlopen(libraryURL.path, RTLD_NOW | RTLD_LOCAL) else {
+        let loadedHandle = libraryURL.withUnsafeFileSystemRepresentation { path -> UnsafeMutableRawPointer? in
+            guard let path else { return nil }
+            return dlopen(path, RTLD_NOW | RTLD_LOCAL)
+        }
+        guard let handle = loadedHandle else {
             throw DynamicLibraryMeetingEchoProcessorError.libraryLoadFailed(Self.lastDLError())
         }
 
@@ -296,11 +331,14 @@ final class DynamicLibraryMeetingEchoProcessor: MeetingEchoSuppressing, @uncheck
                 "localvqe_last_error",
                 from: handle
             )
-            let context = modelURL.path.withCString { modelPath in
-                create(modelPath)
+            let context: ContextHandle = modelURL.withUnsafeFileSystemRepresentation { modelPath -> ContextHandle in
+                guard let modelPath else { return 0 }
+                return create(modelPath)
             }
             guard context != 0 else {
-                throw DynamicLibraryMeetingEchoProcessorError.createFailed("unknown")
+                throw DynamicLibraryMeetingEchoProcessorError.createFailed(
+                    "context allocation returned null"
+                )
             }
 
             self.handle = handle
@@ -328,8 +366,11 @@ final class DynamicLibraryMeetingEchoProcessor: MeetingEchoSuppressing, @uncheck
         resetFunction(context)
     }
 
-    func processFrame(microphone: [Float], reference: [Float]) throws -> [Float] {
-        guard microphone.count == frameSize, reference.count == frameSize else {
+    func processFrame(microphone: [Float], reference: [Float], output: inout [Float]) throws {
+        guard microphone.count == frameSize,
+              reference.count == frameSize,
+              output.count == frameSize
+        else {
             throw DynamicLibraryMeetingEchoProcessorError.invalidFrameSize(
                 expected: frameSize,
                 microphone: microphone.count,
@@ -337,7 +378,6 @@ final class DynamicLibraryMeetingEchoProcessor: MeetingEchoSuppressing, @uncheck
             )
         }
 
-        var output = [Float](repeating: 0, count: frameSize)
         lock.lock()
         defer { lock.unlock() }
         let result = microphone.withUnsafeBufferPointer { microphoneBuffer in
@@ -354,9 +394,15 @@ final class DynamicLibraryMeetingEchoProcessor: MeetingEchoSuppressing, @uncheck
             }
         }
         guard result == 0 else {
-            throw DynamicLibraryMeetingEchoProcessorError.processingFailed(result)
+            let message = Self.lastLocalVQEError(
+                context: context,
+                lastErrorFunction: lastErrorFunction
+            )
+            throw DynamicLibraryMeetingEchoProcessorError.processingFailed(
+                code: result,
+                message: message
+            )
         }
-        return output
     }
 
     private static func loadSymbol<T>(

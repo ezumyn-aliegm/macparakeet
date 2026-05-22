@@ -108,8 +108,10 @@ private final class SubtractingEchoProcessor: MeetingEchoSuppressing, @unchecked
 
     func reset() {}
 
-    func processFrame(microphone: [Float], reference: [Float]) throws -> [Float] {
-        zip(microphone, reference).map { $0 - $1 }
+    func processFrame(microphone: [Float], reference: [Float], output: inout [Float]) throws {
+        for index in output.indices {
+            output[index] = microphone[index] - reference[index]
+        }
     }
 }
 
@@ -129,9 +131,11 @@ private final class RecordingEchoProcessor: MeetingEchoSuppressing, @unchecked S
         references.removeAll()
     }
 
-    func processFrame(microphone: [Float], reference: [Float]) throws -> [Float] {
+    func processFrame(microphone: [Float], reference: [Float], output: inout [Float]) throws {
         references.append(reference)
-        return microphone
+        for index in output.indices {
+            output[index] = microphone[index]
+        }
     }
 }
 
@@ -150,7 +154,7 @@ private final class ThrowingEchoProcessor: MeetingEchoSuppressing, @unchecked Se
 
     func reset() {}
 
-    func processFrame(microphone: [Float], reference: [Float]) throws -> [Float] {
+    func processFrame(microphone: [Float], reference: [Float], output: inout [Float]) throws {
         throw Failure.simulated
     }
 }
