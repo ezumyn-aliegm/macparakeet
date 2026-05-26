@@ -192,7 +192,10 @@ configuration flow:
    `AI needs attention`.
 2. If setup/change is active, show a compact path chooser.
 3. After the user picks a path, show only that path's fields.
-4. Keep the existing provider details, endpoint fields, and model IDs as
+4. Put `Save and Test`, `Test`, model refresh, and cancel near the required
+   fields, before optional token and advanced endpoint details.
+5. Hide disabled formatter controls while setup is still in draft state.
+6. Keep the existing provider details, endpoint fields, and model IDs as
    implementation plumbing inside the selected path.
 
 This keeps the common empty and ready states short while preserving the full
@@ -212,13 +215,19 @@ Possible states:
 
 Primary actions:
 
-1. No saved setup: `Connect AI`.
-2. Ready: `Test`, `Change`, `Turn Off AI`.
-3. Can't connect: `Test Again`, `Fix Setup`, `Turn Off AI`.
+1. No saved setup: show setup choices directly.
+2. Ready: `Test`, `Change Setup`.
+3. Can't connect: `Test Again`, `Fix Setup`.
+
+Disconnecting AI should remain possible but quiet: expose it as a subtle action
+inside the setup/edit flow, not as a prominent destructive button in the ready
+state.
 
 If a user is experimenting with an unsaved provider and that draft test fails,
 the top status should continue to reflect the saved provider as ready. Draft
 errors belong next to the setup fields, not in the saved readiness banner.
+If a setup draft is open, the outer card badge should say `Unsaved` instead of
+claiming the saved provider is simply `Ready`.
 
 ### Setup Path Chooser
 

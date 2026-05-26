@@ -1405,6 +1405,9 @@ struct SettingsView: View {
     /// view's source of truth so testing an unsaved draft cannot make a saved
     /// working provider look broken in the card header.
     private var aiProviderCardStatus: SettingsCardStatus? {
+        if llmSettingsViewModel.hasUnsavedChanges {
+            return SettingsCardStatus(.recommended, label: "Unsaved")
+        }
         switch llmSettingsViewModel.setupStatus {
         case .setUpNeeded:
             return nil

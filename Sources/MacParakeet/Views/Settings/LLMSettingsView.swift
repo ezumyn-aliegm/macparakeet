@@ -39,9 +39,10 @@ struct LLMSettingsView: View {
                 }
             }
 
-            Divider()
-
-            aiFormatterSection
+            if viewModel.isConfigured && !shouldShowSetupFlow {
+                Divider()
+                aiFormatterSection
+            }
         }
         .onAppear {
             syncSelectedPathWithDraft()
@@ -89,14 +90,17 @@ struct LLMSettingsView: View {
                 }
             }
 
-            overviewActions(for: status)
+            if !shouldShowSetupFlow {
+                overviewActions(for: status)
+            }
         }
     }
 
     private var showsInlineStateIndicators: Bool {
-        viewModel.hasUnsavedChanges
+        !shouldShowSetupFlow
+            && (viewModel.hasUnsavedChanges
             || viewModel.connectionTestState != .idle
-            || viewModel.saveState != .idle
+            || viewModel.saveState != .idle)
     }
 
     @ViewBuilder
@@ -107,7 +111,9 @@ struct LLMSettingsView: View {
         case .cannotConnect:
             SettingsStatusChip(status: .recommended, label: "Check setup")
         case .setUpNeeded:
-            SettingsStatusChip(status: .info, label: "Optional")
+            if viewModel.selectedProviderID == nil {
+                SettingsStatusChip(status: .info, label: "Optional")
+            }
         }
     }
 
@@ -135,16 +141,9 @@ struct LLMSettingsView: View {
                 Button {
                     beginSetup()
                 } label: {
-                    Label("Change", systemImage: "arrow.triangle.2.circlepath")
+                    Label("Change Setup", systemImage: "arrow.triangle.2.circlepath")
                 }
                 .parakeetAction(.secondary)
-
-                Button(role: .destructive) {
-                    turnOffAI()
-                } label: {
-                    Label("Turn Off AI", systemImage: "power")
-                }
-                .parakeetAction(.destructive)
 
             case .cannotConnect:
                 Button {
@@ -161,13 +160,6 @@ struct LLMSettingsView: View {
                     Label("Fix Setup", systemImage: "wrench.and.screwdriver")
                 }
                 .parakeetAction(.secondary)
-
-                Button(role: .destructive) {
-                    turnOffAI()
-                } label: {
-                    Label("Turn Off AI", systemImage: "power")
-                }
-                .parakeetAction(.destructive)
             }
 
             Spacer()
@@ -331,6 +323,9 @@ struct LLMSettingsView: View {
                     localModelHintRow(localModelSetupHint)
                 }
 
+                Divider()
+                setupActions
+
                 if viewModel.selectedProviderID == .lmstudio {
                     DisclosureGroup("Optional token", isExpanded: $showOptionalToken) {
                         apiKeyRow
@@ -344,9 +339,6 @@ struct LLMSettingsView: View {
 
                 Divider()
                 privacyInfo
-
-                Divider()
-                setupActions
             }
         }
     }
@@ -367,13 +359,13 @@ struct LLMSettingsView: View {
             modelRow
 
             Divider()
+            setupActions
+
+            Divider()
             connectionSettingsSection
 
             Divider()
             privacyInfo
-
-            Divider()
-            setupActions
         }
     }
 
@@ -387,10 +379,10 @@ struct LLMSettingsView: View {
             cliSettingsSection
 
             Divider()
-            privacyInfo
+            setupActions
 
             Divider()
-            setupActions
+            privacyInfo
         }
     }
 
@@ -410,10 +402,10 @@ struct LLMSettingsView: View {
             modelRow
 
             Divider()
-            privacyInfo
+            setupActions
 
             Divider()
-            setupActions
+            privacyInfo
         }
     }
 
@@ -714,16 +706,21 @@ struct LLMSettingsView: View {
                     .disabled(viewModel.isLoadingModelList)
                 }
 
-                Spacer()
-            }
-
-            HStack(alignment: .top) {
                 Button {
                     cancelSetup()
                 } label: {
                     Label(viewModel.isConfigured ? "Cancel" : "Not Now", systemImage: "xmark")
                 }
                 .parakeetAction(.secondary)
+
+                if viewModel.isConfigured {
+                    Button {
+                        disconnectAI()
+                    } label: {
+                        Label("Disconnect", systemImage: "power")
+                    }
+                    .parakeetAction(.subtle)
+                }
 
                 Spacer()
             }
@@ -1120,7 +1117,7 @@ struct LLMSettingsView: View {
         }
     }
 
-    private func turnOffAI() {
+    private func disconnectAI() {
         viewModel.selectedProviderID = nil
         viewModel.saveConfiguration()
         selectedPath = nil
@@ -1186,6 +1183,9 @@ struct LLMSettingsView: View {
     private func setupStatusTitle(for status: LLMSettingsViewModel.AISetupStatus) -> String {
         switch status {
         case .setUpNeeded:
+            if viewModel.selectedProviderID != nil {
+                return "Finish AI setup"
+            }
             return "AI is off"
         case .ready:
             return "AI is connected"
@@ -1197,6 +1197,9 @@ struct LLMSettingsView: View {
     private func setupStatusCopy(for status: LLMSettingsViewModel.AISetupStatus) -> String {
         switch status {
         case .setUpNeeded:
+            if viewModel.selectedProviderID != nil {
+                return "Save and test this option before MacParakeet uses it."
+            }
             return "Recording and transcription work now. Turn on AI when you want summaries, chat, meeting Ask, or Transforms."
         case .ready(let displayName):
             return "Ready: using \(displayName)."

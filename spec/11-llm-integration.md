@@ -357,8 +357,15 @@ The default Settings shape is a guided flow:
 2. Setup/change chooser: `Local AI app`, `API key`, `Command-line tool`, and
    `Custom API endpoint` under `More options`.
 3. Provider-specific details render only after one path is selected.
-4. Recommended local path keeps LM Studio first and Ollama second.
-5. Privacy copy stays near the selected path: transcription/audio stay local;
+4. Setup actions stay near the required provider fields, before optional token
+   and advanced endpoint details, so saving never requires scrolling through
+   every advanced option first.
+5. Recommended local path keeps LM Studio first and Ollama second.
+6. Disconnecting AI remains available as a subtle setup action, not as a
+   prominent destructive ready-state button.
+7. Formatter controls are shown after AI is saved, not while the user is still
+   choosing an AI option.
+8. Privacy copy stays near the selected path: transcription/audio stay local;
    transcript text is sent only when the user runs an AI action with a
    non-local provider.
 
