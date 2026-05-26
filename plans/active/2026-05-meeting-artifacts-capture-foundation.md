@@ -121,8 +121,8 @@ CREATE TABLE meeting_artifacts (
     createdAt TEXT NOT NULL,
     updatedAt TEXT NOT NULL,
     CHECK (relativePath NOT LIKE '/%'),
-    CHECK (kind IN ('screenshot', 'image', 'fileAttachment')),
-    CHECK (source IN ('user', 'system', 'app', 'agent'))
+    CHECK (kind IN ('image', 'fileAttachment')),
+    CHECK (source IN ('user', 'system'))
 );
 
 CREATE INDEX idx_meeting_artifacts_session_captured_at
@@ -142,11 +142,12 @@ CREATE INDEX idx_meeting_artifacts_kind_captured_at
   `MeetingRecordingService.Session.id`.
 - `transcriptionId`: nullable FK to `transcriptions.id`; set after successful
   finalization/recovery.
-- `kind`: stable product category. Start with `screenshot`, `image`, and
-  `fileAttachment`; do not add speculative kinds until a feature needs them.
-- `source`: who/what captured the artifact. Initial UI likely writes `user`.
-  Future system captures can use `system`; future agent writeback can use
-  `agent`.
+- `kind`: stable product category. Start with only `image` and
+  `fileAttachment`; do not make screenshot a schema kind. A screenshot is an
+  image artifact with screenshot capture metadata.
+- `source`: who/what supplied the artifact. Initial explicit user actions write
+  `user`; future automatic contextual capture can write `system`. Do not add
+  `app` or `agent` until a concrete write path needs that provenance.
 - `relativePath`: path relative to the session folder, not an absolute path.
   Example: `artifacts/<artifact-id>/original.png`.
 - `originalFilename`: user-facing filename when imported/dropped. Screenshots
@@ -164,9 +165,11 @@ CREATE INDEX idx_meeting_artifacts_kind_captured_at
 - `includeInContext`: eligibility flag for future context assembly. It does not
   mean raw bytes may be sent to an LLM. Initial context assembly should include
   `textContent` only unless the user explicitly enables a vision-capable path.
-- `metadataJSON`: small local metadata such as pixel dimensions, source app
-  bundle ID, display ID bucket, image EXIF subset, or extraction diagnostics.
-  Do not put transcript text, file bytes, or large OCR payloads here.
+- `metadataJSON`: small local metadata such as `captureMethod` (`screenshot`,
+  `paste`, `dragDrop`, `filePicker`), pixel dimensions, source app bundle ID,
+  display ID bucket, image EXIF subset, or extraction diagnostics. Keep
+  capture method here in v1 rather than promoting it to a column. Do not put
+  transcript text, file bytes, or large OCR payloads here.
 
 ## File Layout
 
@@ -208,7 +211,6 @@ Add these in `MacParakeetCore`:
 ```swift
 public struct MeetingArtifact: Codable, Identifiable, Sendable {
     public enum Kind: String, Codable, Sendable {
-        case screenshot
         case image
         case fileAttachment
     }
@@ -216,8 +218,6 @@ public struct MeetingArtifact: Codable, Identifiable, Sendable {
     public enum Source: String, Codable, Sendable {
         case user
         case system
-        case app
-        case agent
     }
 
     public var id: UUID
