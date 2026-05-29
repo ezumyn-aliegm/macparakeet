@@ -165,10 +165,14 @@ public final class PromptRepository: PromptRepositoryProtocol {
 
     public func restoreDefaults() throws {
         try dbQueue.write { db in
+            // Built-ins ship unscoped (appliesToSources = NULL → all sources), so
+            // restoring defaults clears any per-source narrowing the user applied
+            // via the Meetings "After each meeting" card. Otherwise a prompt could
+            // come back visible but still silently scoped to one source.
             try db.execute(
                 sql: """
                     UPDATE prompts
-                    SET isVisible = 1, updatedAt = ?
+                    SET isVisible = 1, appliesToSources = NULL, updatedAt = ?
                     WHERE isBuiltIn = 1
                     """,
                 arguments: [Date()]

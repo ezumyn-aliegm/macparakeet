@@ -215,6 +215,38 @@ final class PromptRepositoryTests: XCTestCase {
         XCTAssertNil(reloaded.appliesToSources, "The global Auto-Run toggle means all sources — re-enabling must clear per-source scoping.")
     }
 
+    func testSetAutoRunAddsSourceToExistingPartialScope() throws {
+        // Already auto-run, scoped to file only. Enabling for meeting must union
+        // the sets rather than replace — and not normalize away the partial scope.
+        var chapter = try XCTUnwrap((try repo.fetchAll()).first(where: { $0.name == "Chapter Breakdown" }))
+        chapter.isAutoRun = true
+        chapter.appliesToSources = [.file]
+        try repo.save(chapter)
+
+        try repo.setAutoRun(id: chapter.id, source: .meeting, enabled: true)
+
+        let reloaded = try XCTUnwrap(try repo.fetch(id: chapter.id))
+        XCTAssertEqual(reloaded.appliesToSources, [.file, .meeting])
+        XCTAssertTrue(reloaded.autoRuns(for: .file))
+        XCTAssertTrue(reloaded.autoRuns(for: .meeting))
+        XCTAssertFalse(reloaded.autoRuns(for: .youtube))
+    }
+
+    func testRestoreDefaultsClearsSourceScoping() throws {
+        // A user scopes Summary to meetings only, then hits Restore Defaults.
+        // Built-ins ship unscoped, so restore must clear appliesToSources —
+        // otherwise Summary comes back "visible" but silently meeting-only.
+        let summary = try XCTUnwrap((try repo.fetchAll()).first(where: { $0.name == "Summary" }))
+        try repo.setAutoRun(id: summary.id, source: .meeting, enabled: false) // → {file, youtube}
+        XCTAssertNotNil(try XCTUnwrap(repo.fetch(id: summary.id)).appliesToSources)
+
+        try repo.restoreDefaults()
+
+        let reloaded = try XCTUnwrap(try repo.fetch(id: summary.id))
+        XCTAssertNil(reloaded.appliesToSources, "Restore Defaults must return built-ins to their shipped unscoped state.")
+        XCTAssertTrue(reloaded.isVisible)
+    }
+
     func testReconcilerPreservesAppliesToSources() throws {
         let tmpDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("reconciler-applies-\(UUID().uuidString)")

@@ -317,14 +317,9 @@ struct MeetingsView: View {
             } else {
                 FlowLayout(spacing: 6) {
                     ForEach(viewModel.meetingAutoNotePrompts) { prompt in
-                        AutoNoteChip(
-                            title: prompt.name,
-                            isOn: viewModel.isMeetingAutoNote(prompt)
-                        ) {
-                            viewModel.setMeetingAutoNote(
-                                prompt,
-                                enabled: !viewModel.isMeetingAutoNote(prompt)
-                            )
+                        let isOn = viewModel.isMeetingAutoNote(prompt)
+                        AutoNoteChip(title: prompt.name, isOn: isOn) {
+                            viewModel.setMeetingAutoNote(prompt, enabled: !isOn)
                         }
                     }
                 }
