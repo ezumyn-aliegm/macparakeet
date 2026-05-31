@@ -77,7 +77,14 @@ final class YouTubeInputPanelController {
 
         self.panel = panel
 
-        NSApp.activate()
+        // This panel is summoned by a global hotkey, typically while another
+        // app is frontmost. The cooperative `NSApp.activate()` is routinely
+        // declined for a background app responding to a CGEvent tap, so the
+        // panel gets ordered into our own window list but is never raised above
+        // the active app — it only appears once the user manually focuses
+        // MacParakeet. Force activation so the panel reliably comes forward,
+        // matching the file-transcription flow in `MenuBarCoordinator`.
+        NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
 
         installResignObserver()
