@@ -28,10 +28,18 @@ Two parts:
 - **Keep podcast routing** (`PodcastURLValidator` → iTunes resolver) and **YouTube
   videoID dedup** (`YouTubeURLValidator.extractVideoID`) exactly as-is.
 - **CLI public contract unchanged** — it already accepts any downloadable URL.
-- No continuous animation when the tab/window is inactive or Reduce Motion is on
-  (protects the app's low-idle-CPU ethos; cf. issue #107).
-- No third-party logo assets bundled — glyphs are hand-drawn simplified `Shape`s
-  (recolorable, trademark-safe, matches brand-assets line-mark philosophy).
+- The idle orbit is fully static — zero continuous animation, so the Transcribe tab
+  costs no CPU and cannot jitter (protects the app's low-idle-CPU ethos; cf. issue
+  #107). Motion is on intent only: one eased revolution on hover and a bloom on a
+  match, both gated by Reduce Motion. (A continuous `repeatForever` `.rotationEffect`
+  was tried and *measured* at ~17% CPU — SwiftUI drives a per-frame main-thread
+  display-list regeneration for it, not a free render-server transform — so it was
+  dropped.)
+- Real platform marks, not hand-drawn approximations: single-path brand glyphs from
+  [Simple Icons](https://simpleicons.org) (icon set CC0) shipped as monochrome vector
+  PDFs (`Resources/BrandGlyphs/`) and tinted as template images (`BrandGlyphImage`).
+  Brand trademarks belong to their owners and are used nominatively (provenance:
+  `Resources/BrandGlyphs/README.md`).
 
 ## Architecture
 
@@ -53,17 +61,14 @@ Two parts:
   recognized by host like every other platform.
 
 ### App / UI
-- **NEW `PlatformGlyph`** (`Views/Components/PlatformGlyph.swift`): one simplified,
-  monochrome, tintable SwiftUI mark per platform + a generic link/globe fallback.
-  Geometry per research brief (YouTube wide-pill+knockout triangle; X pointed
-  crossing strokes; FB circle+knockout f; IG outlined squircle+lens+dot; Vimeo
-  rounded "v"; TikTok eighth-note; Podcasts mic+rings).
+- **NEW `PlatformGlyph`** (`Views/Components/PlatformGlyph.swift`): renders each
+  platform's real brand mark from a bundled monochrome vector PDF, loaded as a
+  tintable template image by **`BrandGlyphImage`** (`Views/Components/`). A hand-drawn
+  globe covers the generic/unknown case.
 - **NEW `MediaPlatformOrbitView`** (`Views/Transcription/MediaPlatformOrbitView.swift`):
-  the orbiting hero. Inputs: matched `MediaPlatform?`. Slow rotation is render-
-  server-driven (one `repeatForever` `.rotationEffect`, auto-throttled by the
-  window server when occluded/inactive) and static under
-  `accessibilityReduceMotion`. Reuses the app's
-  rosette motif for the core (visual continuity).
+  the constellation hero. Inputs: matched `MediaPlatform?`. Static at rest (zero CPU);
+  one eased full revolution on hover; the matched mark blooms to the center on a
+  match. All motion gated by `accessibilityReduceMotion`.
 - **DesignSystem**: add brand tints (vimeoBlue, facebookBlue, tiktok, instagramPink;
   reuse youtubeRed/xMark/podcastPurple) + a `MediaPlatform → (tint, glyph)` mapping
   in the app layer.
@@ -85,11 +90,16 @@ Two parts:
   and rejects ("hello", empty, whitespace, non-URL).
 - Update `TranscriptionViewModelTests` any case asserting non-YT/X/podcast URLs are
   invalid (now valid).
+- `BrandGlyphImageTests` — every platform resolves a bundled template mark (guards the
+  SPM `.process` flattening behavior; a regression silently degrades chips to globes).
 - Keep existing validator tests green.
 
 ## Verification
 - `swift test` green.
-- Build + run app; screenshot the orbit idle + paste-react states; iterate.
+- Built + ran the app: real marks render in the orbit; idle Transcribe tab measured at
+  **0% CPU** (was ~17% with the continuous rotation).
+- Glyph/orbit fidelity verified via offscreen `ImageRenderer` snapshots of the bundled
+  marks (idle, hover-revolve, bloom).
 - Spot-check a Vimeo/TikTok download via CLI if network allows (not gating-critical).
 
 ## Docs

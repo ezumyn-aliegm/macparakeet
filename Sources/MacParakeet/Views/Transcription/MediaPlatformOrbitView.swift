@@ -1,27 +1,25 @@
 import SwiftUI
 import MacParakeetCore
 
-/// The hero for the Transcribe-URL surfaces: a slow constellation of platform
-/// glyphs orbiting a core. When a recognized URL is pasted, the orbit recedes and
-/// the matched platform blooms to focus in the center.
+/// The hero for the Transcribe-URL surfaces: a constellation of real platform marks
+/// arranged around a core. When a recognized URL is pasted, the constellation recedes
+/// and the matched platform blooms to focus in the center.
 ///
-/// **Idle-CPU note.** The rotation is driven by a single `repeatForever`
-/// `.rotationEffect` animation, *not* a `TimelineView`. That means the view `body`
-/// is evaluated once and Core Animation interpolates the transform on the render
-/// server — there is no per-frame SwiftUI/NSHostingView display-list re-commit
-/// (the cost behind the v0.6.14 idle-CPU regression; see `BreathingSeedOfLifeView`).
-/// The window server automatically throttles render-server animation when the
-/// window is occluded, miniaturized, or inactive, so no extra visibility gating is
-/// needed. Under Reduce Motion the orbit is static.
+/// **Motion on intent, calm at rest.** The constellation is perfectly *static* while
+/// idle, so the Transcribe tab costs no CPU and cannot jitter. (A continuous
+/// `repeatForever` `.rotationEffect` was tried and measured: SwiftUI drives a
+/// per-frame main-thread display-list regeneration for it — ~17% CPU — rather than a
+/// free render-server transform, so it was dropped.) Motion happens only on intent:
+/// the constellation makes one smooth full revolution on hover (a single eased
+/// animation that settles back to zero work), and the center blooms on a match. All
+/// motion is gated by Reduce Motion.
 struct MediaPlatformOrbitView: View {
     /// The platform recognized from the current URL draft (nil while idle/typing).
     var matched: MediaPlatform?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var spin: Double = 0
-
-    /// Seconds per full revolution — deliberately slow.
-    private let period: Double = 48
+    @State private var hovering = false
 
     private let orbitPlatforms: [MediaPlatform] = [
         .youtube, .x, .vimeo, .facebook, .tiktok, .instagram, .applePodcasts,
@@ -42,8 +40,9 @@ struct MediaPlatformOrbitView: View {
 
             ZStack {
                 guideRing(radius: radius)
-                    .opacity(matched == nil ? 0.22 : 0.06)
+                    .opacity(matched == nil ? (hovering ? 0.34 : 0.20) : 0.06)
                     .animation(fade, value: matched == nil)
+                    .animation(fade, value: hovering)
 
                 ring(radius: radius, node: node)
                     .opacity(matched == nil ? 1 : 0.14)
@@ -54,8 +53,11 @@ struct MediaPlatformOrbitView: View {
             }
             .frame(width: geo.size.width, height: geo.size.height)
         }
-        .onAppear(perform: startSpin)
-        .onChange(of: reduceMotion) { _, _ in startSpin() }
+        .contentShape(Rectangle())
+        .onHover { isHovering in
+            hovering = isHovering
+            if isHovering { revolve() }
+        }
     }
 
     // MARK: - Pieces
@@ -66,19 +68,27 @@ struct MediaPlatformOrbitView: View {
             .frame(width: radius * 2, height: radius * 2)
     }
 
-    /// The orbiting chips. Each chip self-places at `base + spin` and counter-rotates
-    /// by the same amount so it stays upright while orbiting. Animating the single
-    /// `spin` value promotes every rotation to a render-server transform.
+    /// The orbiting chips. Each chip is placed at a **static** resting position and
+    /// counter-rotates by `-spin`; the whole ring then rotates by `+spin`. Because
+    /// `spin` is read only as a direct `.rotationEffect` value — never to compute
+    /// per-chip geometry in the body — Core Animation interpolates it on the render
+    /// server with no per-frame body re-evaluation. (The earlier `base + spin`
+    /// angle was recomputed in-body every frame, which quietly cost real CPU.)
     private func ring(radius: CGFloat, node: CGFloat) -> some View {
         ZStack {
             ForEach(Array(orbitPlatforms.enumerated()), id: \.element) { index, platform in
-                let angle = baseDegrees(index) + spin
                 chip(platform, size: node)
-                    .rotationEffect(.degrees(-angle))   // keep upright
-                    .offset(y: -radius)
-                    .rotationEffect(.degrees(angle))     // place on the circle
+                    .rotationEffect(.degrees(-spin))               // keep upright
+                    .offset(restingOffset(index, radius: radius))  // static placement
             }
         }
+        .rotationEffect(.degrees(spin))                            // orbit the whole ring
+    }
+
+    /// Resting position (no spin) for chip `index` on the ring; first chip at top.
+    private func restingOffset(_ index: Int, radius: CGFloat) -> CGSize {
+        let theta = baseDegrees(index) * .pi / 180
+        return CGSize(width: radius * CGFloat(cos(theta)), height: radius * CGFloat(sin(theta)))
     }
 
     private func chip(_ platform: MediaPlatform, size: CGFloat) -> some View {
@@ -149,14 +159,13 @@ struct MediaPlatformOrbitView: View {
 
     // MARK: - Motion
 
-    /// (Re)start the continuous rotation. Render-server driven via `repeatForever`,
-    /// so it costs no app-side per-frame work; static under Reduce Motion.
-    private func startSpin() {
-        spin = 0
-        guard !reduceMotion else { return }
-        withAnimation(.linear(duration: period).repeatForever(autoreverses: false)) {
-            spin = 360
-        }
+    /// One smooth full revolution, triggered on hover. A single eased animation (not a
+    /// `repeatForever` linear loop) has no seam to stutter and — crucially — leaves the
+    /// constellation static at rest, so the idle tab does zero per-frame work. No-op
+    /// under Reduce Motion or while a match is bloomed.
+    private func revolve() {
+        guard !reduceMotion, matched == nil else { return }
+        withAnimation(.easeInOut(duration: 1.4)) { spin += 360 }
     }
 
     /// Resting angle (degrees) for chip `index`, evenly spaced, first chip at top.
