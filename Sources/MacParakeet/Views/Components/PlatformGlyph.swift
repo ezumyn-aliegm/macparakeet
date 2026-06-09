@@ -64,7 +64,7 @@ extension MediaPlatform {
         case .instagram: return DesignSystem.Colors.instagramPink
         case .applePodcasts: return DesignSystem.Colors.podcastPurple
         case .soundcloud: return DesignSystem.Colors.warningAmber
-        case .twitch: return DesignSystem.Colors.podcastPurple
+        case .twitch: return DesignSystem.Colors.twitchPurple
         }
     }
 }

@@ -106,6 +106,9 @@ enum DesignSystem {
         // Instagram badge — representative magenta from the brand gradient #E1306C
         static let instagramPink = Color(red: 0.882, green: 0.188, blue: 0.424)
 
+        // Twitch badge — "Twitch Purple" #9146FF
+        static let twitchPurple = Color(red: 0.569, green: 0.275, blue: 1.0)
+
         // Pill / overlay
         static let pillBackground = Color.black.opacity(0.7)
         static let pillBorder = Color.white.opacity(0.15)

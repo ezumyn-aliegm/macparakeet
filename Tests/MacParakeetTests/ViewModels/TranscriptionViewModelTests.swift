@@ -431,6 +431,22 @@ final class TranscriptionViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.sourceKind, .podcastURL)
     }
 
+    func testSchemelessApplePodcastsLinkRoutesToPodcastSourceKind() async throws {
+        // A scheme-less Apple Podcasts host must normalize to https:// and still take
+        // the podcast branch (checked before the generic yt-dlp lane), reaching the
+        // service with an explicit scheme rather than falling through to "Video".
+        viewModel.configure(transcriptionService: mockService, transcriptionRepo: mockRepo)
+        viewModel.urlInput = "podcasts.apple.com/us/podcast/the-daily/id1200361736?i=1000654321987"
+        XCTAssertTrue(viewModel.isValidURL)
+
+        viewModel.transcribeURL()
+        XCTAssertEqual(viewModel.sourceKind, .podcastURL)
+
+        try await Task.sleep(for: .milliseconds(200))
+        let lastURL = await mockService.lastURLString
+        XCTAssertEqual(lastURL, "https://podcasts.apple.com/us/podcast/the-daily/id1200361736?i=1000654321987")
+    }
+
     // MARK: - Duplicate URL Detection
 
     func testTranscribeURLShowsExistingWhenAlreadyTranscribed() async {

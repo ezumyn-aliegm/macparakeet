@@ -97,8 +97,14 @@ public enum MediaPlatform: String, CaseIterable, Sendable, Hashable {
     /// text.
     public static func isTranscribable(_ string: String) -> Bool {
         if DownloadableMediaURLValidator.isDownloadableMediaURL(string) { return true }
-        // Scheme-less but recognizable host (typed without https://).
-        return recognize(string) != nil
+        // The only other accepted form is a scheme-less but recognizable host typed
+        // without https:// (e.g. `youtube.com/watch?v=…`). A string that *carries* a
+        // scheme has already been judged by the downloadable-media gate above; if that
+        // rejected it (e.g. `ftp://vimeo.com/…`), recognizing the host must not re-open
+        // the gate — otherwise the button lights up on a link the downloader can't use.
+        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.contains("://") else { return false }
+        return recognize(trimmed) != nil
     }
 
     /// Normalizes a transcribable URL for the download layer, which requires an
@@ -140,7 +146,14 @@ public enum MediaPlatform: String, CaseIterable, Sendable, Hashable {
         if let at = rest.lastIndex(of: "@") {
             rest = String(rest[rest.index(after: at)...])
         }
-        if let colon = rest.firstIndex(of: ":") {
+        if rest.hasPrefix("[") {
+            // IPv6 literal authority (`[::1]`, `[2001:db8::1]:443`): the host lives
+            // inside the brackets, so a naive first-colon port scan would mangle it
+            // to "[". No recognized platform uses an IP literal, but keep the parser
+            // honest for any future caller.
+            guard let close = rest.firstIndex(of: "]") else { return nil }
+            rest = String(rest[rest.index(after: rest.startIndex)..<close])
+        } else if let colon = rest.firstIndex(of: ":") {
             rest = String(rest[..<colon])
         }
         // Drop a single trailing dot — `youtube.com.` is a valid absolute-FQDN form

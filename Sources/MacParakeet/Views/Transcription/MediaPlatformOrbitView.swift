@@ -64,6 +64,15 @@ struct MediaPlatformOrbitView: View {
             hovering = isHovering
             if isHovering { revolve() }
         }
+        .onChange(of: matched) { _, newValue in
+            // A match should leave the ring calm: end an in-flight hover revolve so it
+            // doesn't keep turning (faded) behind the blooming center. Resetting `spin`
+            // directly ends the animation; the ring's own fade-out covers the snap.
+            if newValue != nil, revolving {
+                spin = 0
+                revolving = false
+            }
+        }
     }
 
     // MARK: - Pieces
@@ -75,11 +84,15 @@ struct MediaPlatformOrbitView: View {
     }
 
     /// The orbiting chips. Each chip is placed at a **static** resting position and
-    /// counter-rotates by `-spin`; the whole ring then rotates by `+spin`. Because
-    /// `spin` is read only as a direct `.rotationEffect` value — never to compute
-    /// per-chip geometry in the body — Core Animation interpolates it on the render
-    /// server with no per-frame body re-evaluation. (The earlier `base + spin`
-    /// angle was recomputed in-body every frame, which quietly cost real CPU.)
+    /// counter-rotates by `-spin`; the whole ring then rotates by `+spin`. Reading
+    /// `spin` only as a direct `.rotationEffect` value — never to compute per-chip
+    /// geometry in the body — keeps the chips out of per-frame body re-evaluation and
+    /// is strictly cheaper than the earlier `base + spin` angle that recomputed
+    /// in-body every frame. It is **not** free, though: while the one-shot hover
+    /// revolve runs, SwiftUI still re-commits the rotation each frame on the main
+    /// thread — which is exactly why a `repeatForever` spin measured ~17% idle CPU and
+    /// was dropped (see the type doc). That per-frame cost is acceptable here only
+    /// because the motion is transient and on-intent; do **not** make `spin` loop.
     private func ring(radius: CGFloat, node: CGFloat) -> some View {
         ZStack {
             ForEach(Array(orbitPlatforms.enumerated()), id: \.element) { index, platform in

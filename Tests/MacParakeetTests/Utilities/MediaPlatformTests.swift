@@ -128,6 +128,10 @@ final class MediaPlatformTests: XCTestCase {
         // lighting up on arbitrary typed words like "todo.txt").
         XCTAssertFalse(MediaPlatform.isTranscribable("example.com/video"))
         XCTAssertFalse(MediaPlatform.isTranscribable("ftp://example.com/a.mp3"))
+        // A recognized host behind a non-http(s) scheme must NOT pass either: the
+        // downloader only handles http(s), so the button would light up then fail.
+        XCTAssertFalse(MediaPlatform.isTranscribable("ftp://vimeo.com/76979871"))
+        XCTAssertFalse(MediaPlatform.isTranscribable("magnet://youtube.com/watch?v=x"))
     }
 
     // MARK: - Metadata
