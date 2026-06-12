@@ -287,6 +287,65 @@ final class DictationServiceTests: XCTestCase {
         XCTAssertEqual(operation["language"], "ko")
     }
 
+    func testStopRecordingUsesLiveNemotronResultWhenAvailable() async throws {
+        service = DictationService(
+            audioProcessor: mockAudio,
+            sttTranscriber: mockSTT,
+            dictationRepo: dictationRepo,
+            shouldAttemptLiveDictationTranscription: { true }
+        )
+        await mockSTT.configure(result: STTResult(text: "file fallback"))
+        await mockSTT.configureLive(result: STTResult(
+            text: "live final",
+            words: [],
+            language: "en",
+            engine: .nemotron,
+            engineVariant: NemotronModelVariant.multilingual1120.rawValue
+        ))
+
+        try await service.startRecording()
+        await mockSTT.emitLivePartial(" live partial ")
+        try await Task.sleep(for: .milliseconds(20))
+        let liveTranscript = await service.liveTranscript
+        XCTAssertEqual(liveTranscript, "live partial")
+
+        await mockAudio.emitLiveSamples([0.1, 0.2, 0.3])
+        let result = try await service.stopRecording()
+
+        XCTAssertEqual(result.dictation.rawTranscript, "live final")
+        XCTAssertEqual(result.dictation.engine, "nemotron")
+        XCTAssertEqual(result.dictation.engineVariant, NemotronModelVariant.multilingual1120.rawValue)
+        let transcribeCallCount = await mockSTT.transcribeCallCount
+        let liveAppendCallCount = await mockSTT.liveAppendCallCount
+        let liveFinishCallCount = await mockSTT.liveFinishCallCount
+        XCTAssertEqual(transcribeCallCount, 0)
+        XCTAssertEqual(liveAppendCallCount, 1)
+        XCTAssertEqual(liveFinishCallCount, 1)
+    }
+
+    func testStopRecordingFallsBackToRecordedFileWhenLiveNemotronFails() async throws {
+        service = DictationService(
+            audioProcessor: mockAudio,
+            sttTranscriber: mockSTT,
+            dictationRepo: dictationRepo,
+            shouldAttemptLiveDictationTranscription: { true }
+        )
+        await mockSTT.configure(result: STTResult(text: "file fallback"))
+        await mockSTT.configureLive(appendError: STTError.transcriptionFailed("live failed"))
+
+        try await service.startRecording()
+        await mockAudio.emitLiveSamples([0.1, 0.2, 0.3])
+        let result = try await service.stopRecording()
+
+        XCTAssertEqual(result.dictation.rawTranscript, "file fallback")
+        let transcribeCallCount = await mockSTT.transcribeCallCount
+        let liveAppendCallCount = await mockSTT.liveAppendCallCount
+        let liveCancelCallCount = await mockSTT.liveCancelCallCount
+        XCTAssertEqual(transcribeCallCount, 1)
+        XCTAssertEqual(liveAppendCallCount, 1)
+        XCTAssertEqual(liveCancelCallCount, 1)
+    }
+
     func testStopRecordingUsesLatestAppCategoryForTelemetry() async throws {
         let telemetry = DictationTelemetrySpy()
         Telemetry.configure(telemetry)
@@ -294,7 +353,7 @@ final class DictationServiceTests: XCTestCase {
 
         try await service.startRecording(
             context: DictationTelemetryContext(
-                trigger: .hotkey,
+                trigger: .menuBar,
                 mode: .hold,
                 appCategory: .browser
             )
@@ -309,7 +368,11 @@ final class DictationServiceTests: XCTestCase {
         })
         XCTAssertEqual(completed.props?["app_category"], "email")
 
-        let operation = try XCTUnwrap(dictationOperationProps(in: events).last)
+        let operation = try XCTUnwrap(successfulDictationOperation(
+            in: events,
+            trigger: .menuBar,
+            mode: .hold
+        ))
         XCTAssertEqual(operation["app_category"], "email")
     }
 
@@ -320,7 +383,7 @@ final class DictationServiceTests: XCTestCase {
 
         try await service.startRecording(
             context: DictationTelemetryContext(
-                trigger: .hotkey,
+                trigger: .menuBar,
                 mode: .hold,
                 appCategory: .browser
             )
@@ -335,7 +398,11 @@ final class DictationServiceTests: XCTestCase {
         })
         XCTAssertEqual(completed.props?["app_category"], "other")
 
-        let operation = try XCTUnwrap(dictationOperationProps(in: events).last)
+        let operation = try XCTUnwrap(successfulDictationOperation(
+            in: events,
+            trigger: .menuBar,
+            mode: .hold
+        ))
         XCTAssertEqual(operation["app_category"], "other")
     }
 
@@ -777,6 +844,18 @@ final class DictationServiceTests: XCTestCase {
         events.compactMap { event in
             guard case .dictationOperation = event else { return nil }
             return event.props ?? [:]
+        }
+    }
+
+    private func successfulDictationOperation(
+        in events: [TelemetryEventSpec],
+        trigger: TelemetryDictationTrigger,
+        mode: TelemetryDictationMode
+    ) -> [String: String]? {
+        dictationOperationProps(in: events).last { props in
+            props["outcome"] == ObservabilityOutcome.success.rawValue
+                && props["trigger"] == trigger.rawValue
+                && props["mode"] == mode.rawValue
         }
     }
 

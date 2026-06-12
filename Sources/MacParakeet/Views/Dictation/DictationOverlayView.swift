@@ -406,21 +406,34 @@ struct DictationOverlayView: View {
 
     /// Red dot + timer + waveform — no buttons needed since releasing push-to-talk stops recording.
     private var holdToTalkContent: some View {
-        HStack(spacing: 12) {
-            // Recording indicator dot
-            Circle()
-                .fill(DesignSystem.Colors.recordingRed)
-                .frame(width: 5, height: 5)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 12) {
+                // Recording indicator dot
+                Circle()
+                    .fill(DesignSystem.Colors.recordingRed)
+                    .frame(width: 5, height: 5)
 
-            // Recording timer
-            Text(viewModel.formattedElapsed)
-                .font(.system(size: 12, weight: .medium).monospacedDigit())
-                .foregroundStyle(.white.opacity(0.6))
-                .frame(width: 36)
+                // Recording timer
+                Text(viewModel.formattedElapsed)
+                    .font(.system(size: 12, weight: .medium).monospacedDigit())
+                    .foregroundStyle(.white.opacity(0.6))
+                    .frame(width: 36)
 
-            // Waveform
-            WaveformView(audioLevel: viewModel.audioLevel)
-                .frame(width: 64)
+                // Waveform
+                WaveformView(audioLevel: viewModel.audioLevel)
+                    .frame(width: 64)
+            }
+
+            if let liveTranscriptPreview {
+                Text(liveTranscriptPreview)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.76))
+                    .lineLimit(2)
+                    .truncationMode(.head)
+                    .multilineTextAlignment(.leading)
+                    .frame(width: 220, alignment: .leading)
+                    .transition(.opacity.animation(.easeInOut(duration: 0.16)))
+            }
         }
     }
 
@@ -434,43 +447,67 @@ struct DictationOverlayView: View {
         viewModel.hoverTooltip?.contains("Stop") == true
     }
 
+    private var liveTranscriptPreview: String? {
+        guard viewModel.sessionKind == .dictation else { return nil }
+        let compact = viewModel.liveTranscript
+            .replacingOccurrences(of: "\n", with: " ")
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
+        guard !compact.isEmpty else { return nil }
+        if compact.count <= 180 { return compact }
+        return String(compact.suffix(180))
+    }
+
     private var recordingContent: some View {
-        HStack(spacing: 12) {
-            // Cancel button
-            Button(action: { viewModel.onCancel?() }) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(.white.opacity(isCancelHovered ? 1.0 : 0.9))
-                    .frame(width: 22, height: 22)
-                    .background(Circle().fill(Color.white.opacity(isCancelHovered ? 0.35 : 0.2)))
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 12) {
+                // Cancel button
+                Button(action: { viewModel.onCancel?() }) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.white.opacity(isCancelHovered ? 1.0 : 0.9))
+                        .frame(width: 22, height: 22)
+                        .background(Circle().fill(Color.white.opacity(isCancelHovered ? 0.35 : 0.2)))
+                }
+                .buttonStyle(.plain)
+                .animation(.easeInOut(duration: 0.15), value: isCancelHovered)
+
+                // Recording timer
+                Text(viewModel.formattedElapsed)
+                    .font(.system(size: 12, weight: .medium).monospacedDigit())
+                    .foregroundStyle(.white.opacity(0.6))
+                    .frame(width: 36)
+
+                // Waveform
+                WaveformView(audioLevel: viewModel.audioLevel)
+                    .frame(width: 64)
+
+                // Stop button
+                Button(action: { viewModel.onStop?() }) {
+                    RoundedRectangle(cornerRadius: 2.5)
+                        .fill(Color.white)
+                        .frame(width: 9, height: 9)
+                        .padding(7)
+                        .background(
+                            Circle().fill(isStopHovered ? Color.red.opacity(1.0) : Color.red.opacity(0.85))
+                                .shadow(color: isStopHovered ? .red.opacity(0.5) : .clear, radius: 6)
+                        )
+                }
+                .buttonStyle(.plain)
+                .scaleEffect(isStopHovered ? 1.1 : 1.0)
+                .animation(.easeInOut(duration: 0.15), value: isStopHovered)
             }
-            .buttonStyle(.plain)
-            .animation(.easeInOut(duration: 0.15), value: isCancelHovered)
 
-            // Recording timer
-            Text(viewModel.formattedElapsed)
-                .font(.system(size: 12, weight: .medium).monospacedDigit())
-                .foregroundStyle(.white.opacity(0.6))
-                .frame(width: 36)
-
-            // Waveform
-            WaveformView(audioLevel: viewModel.audioLevel)
-                .frame(width: 64)
-
-            // Stop button
-            Button(action: { viewModel.onStop?() }) {
-                RoundedRectangle(cornerRadius: 2.5)
-                    .fill(Color.white)
-                    .frame(width: 9, height: 9)
-                    .padding(7)
-                    .background(
-                        Circle().fill(isStopHovered ? Color.red.opacity(1.0) : Color.red.opacity(0.85))
-                            .shadow(color: isStopHovered ? .red.opacity(0.5) : .clear, radius: 6)
-                    )
+            if let liveTranscriptPreview {
+                Text(liveTranscriptPreview)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.76))
+                    .lineLimit(2)
+                    .truncationMode(.head)
+                    .multilineTextAlignment(.leading)
+                    .frame(width: 270, alignment: .leading)
+                    .transition(.opacity.animation(.easeInOut(duration: 0.16)))
             }
-            .buttonStyle(.plain)
-            .scaleEffect(isStopHovered ? 1.1 : 1.0)
-            .animation(.easeInOut(duration: 0.15), value: isStopHovered)
         }
     }
 

@@ -1,7 +1,7 @@
 import Foundation
 @testable import MacParakeetCore
 
-public actor MockSTTClient: STTClientProtocol, SpeechEngineRoutedTranscribing, SpeechEngineSwitching {
+public actor MockSTTClient: STTClientProtocol, SpeechEngineRoutedTranscribing, STTLiveDictationTranscribing, SpeechEngineSwitching {
     public var transcribeResult: STTResult?
     public var transcribeError: Error?
     public var transcribeCallCount = 0
@@ -22,11 +22,23 @@ public actor MockSTTClient: STTClientProtocol, SpeechEngineRoutedTranscribing, S
     public var speechEngineSwitchProgressMessages: [String] = []
     public var parakeetModelVariantSwitches: [ParakeetModelVariant] = []
     public var parakeetModelVariantSwitchError: Error?
+    public var liveBeginError: Error?
+    public var liveAppendError: Error?
+    public var liveFinishError: Error?
+    public var liveFinishResult: STTResult?
+    public var liveBeginCallCount = 0
+    public var liveAppendCallCount = 0
+    public var liveFinishCallCount = 0
+    public var liveCancelCallCount = 0
+    public var liveAppendedSamples: [[Float]] = []
+    public var liveEnabled = false
     private var warmUpState: STTWarmUpState = .idle
     private var warmUpObservers: [UUID: AsyncStream<STTWarmUpState>.Continuation] = [:]
     private var backgroundWarmUpTask: Task<Void, Never>?
     private var queuedTranscribeResults: [STTResult] = []
     private var queuedTranscribeErrors: [Error] = []
+    private var liveSessionID: UUID?
+    private var livePartialHandler: (@Sendable (String) -> Void)?
 
     public init() {}
 
@@ -101,6 +113,77 @@ public actor MockSTTClient: STTClientProtocol, SpeechEngineRoutedTranscribing, S
     ) async throws -> STTResult {
         speechEngineSelections.append(speechEngine)
         return try await transcribe(audioPath: audioPath, job: job, onProgress: onProgress)
+    }
+
+    public func configureLive(
+        result: STTResult? = nil,
+        beginError: Error? = nil,
+        appendError: Error? = nil,
+        finishError: Error? = nil
+    ) {
+        liveEnabled = true
+        liveFinishResult = result
+        liveBeginError = beginError
+        liveAppendError = appendError
+        liveFinishError = finishError
+        liveBeginCallCount = 0
+        liveAppendCallCount = 0
+        liveFinishCallCount = 0
+        liveCancelCallCount = 0
+        liveAppendedSamples = []
+        liveSessionID = nil
+        livePartialHandler = nil
+    }
+
+    public func beginLiveDictationTranscription(
+        onPartial: @escaping @Sendable (String) -> Void
+    ) async throws -> UUID {
+        liveBeginCallCount += 1
+        guard liveEnabled else {
+            throw STTLiveDictationTranscriptionError.unsupportedEngine(.parakeet)
+        }
+        if let liveBeginError {
+            throw liveBeginError
+        }
+        let id = UUID()
+        liveSessionID = id
+        livePartialHandler = onPartial
+        return id
+    }
+
+    public func appendLiveDictationSamples(_ samples: [Float], sessionID: UUID) async throws {
+        guard liveSessionID == sessionID else {
+            throw STTLiveDictationTranscriptionError.sessionNotActive
+        }
+        liveAppendCallCount += 1
+        liveAppendedSamples.append(samples)
+        if let liveAppendError {
+            throw liveAppendError
+        }
+    }
+
+    public func finishLiveDictationTranscription(sessionID: UUID) async throws -> STTResult {
+        guard liveSessionID == sessionID else {
+            throw STTLiveDictationTranscriptionError.sessionNotActive
+        }
+        liveFinishCallCount += 1
+        liveSessionID = nil
+        livePartialHandler = nil
+        if let liveFinishError {
+            throw liveFinishError
+        }
+        return liveFinishResult ?? STTResult(text: "Mock live transcription", words: [], engine: .nemotron)
+    }
+
+    public func cancelLiveDictationTranscription(sessionID: UUID) async {
+        guard liveSessionID == sessionID else { return }
+        liveCancelCallCount += 1
+        liveSessionID = nil
+        livePartialHandler = nil
+    }
+
+    public func emitLivePartial(_ partial: String) {
+        livePartialHandler?(partial)
     }
 
     public func warmUp(onProgress: (@Sendable (String) -> Void)?) async throws {
