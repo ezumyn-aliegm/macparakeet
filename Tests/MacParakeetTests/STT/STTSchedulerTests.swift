@@ -93,6 +93,37 @@ final class STTSchedulerTests: XCTestCase {
         XCTAssertEqual(finalAvailability, .available)
     }
 
+    func testLiveDictationBeginRacingShutdownUnwindsRuntimeSession() async throws {
+        let runtime = MockSTTRuntime()
+        await runtime.setCurrentSelection(SpeechEngineSelection(engine: .nemotron))
+        await runtime.blockNextLiveBegin()
+        let scheduler = STTScheduler(runtimeProvider: runtime, meetingLiveChunkBacklogLimit: 8)
+
+        let beginTask = Task {
+            try await scheduler.beginLiveDictationTranscription { _ in }
+        }
+        await runtime.waitForLiveBeginStart()
+        // Quiesce clears the scheduler-side reservation while runtime.begin is
+        // still in flight; its runtime-level cancel is a no-op at this point.
+        await scheduler.shutdown()
+        await runtime.resumeLiveBegin()
+
+        do {
+            _ = try await beginTask.value
+            XCTFail("Expected begin to unwind after losing its reservation")
+        } catch let error as STTSchedulerError {
+            XCTAssertEqual(error, .unavailable)
+        }
+
+        // The runtime session created by the in-flight begin must have been
+        // cancelled, not orphaned (an orphan would block the interactive lane
+        // until app restart).
+        let liveCancelCallCount = await runtime.liveCancelCallCount
+        XCTAssertEqual(liveCancelCallCount, 1)
+        let hasActiveSession = await runtime.hasActiveLiveDictationSession
+        XCTAssertFalse(hasActiveSession)
+    }
+
     func testMeetingFinalizeWaitsBehindRunningFileTranscriptionOnSharedBackgroundSlot() async throws {
         let runtime = MockSTTRuntime()
         await runtime.block(path: "file")
@@ -987,6 +1018,10 @@ private actor MockSTTRuntime: STTRuntimeProtocol {
     private var liveFinishContinuation: CheckedContinuation<Void, Never>?
     private var liveFinishStartContinuation: CheckedContinuation<Void, Never>?
     private var liveFinishStartedCount = 0
+    private var shouldBlockNextLiveBegin = false
+    private var liveBeginContinuation: CheckedContinuation<Void, Never>?
+    private var liveBeginStartContinuation: CheckedContinuation<Void, Never>?
+    private var liveBeginStartedCount = 0
 
     func transcribe(
         audioPath: String,
@@ -1029,6 +1064,15 @@ private actor MockSTTRuntime: STTRuntimeProtocol {
         sessionID: UUID,
         onPartial: @escaping @Sendable (String) -> Void
     ) async throws {
+        liveBeginStartedCount += 1
+        liveBeginStartContinuation?.resume()
+        liveBeginStartContinuation = nil
+        if shouldBlockNextLiveBegin {
+            shouldBlockNextLiveBegin = false
+            await withCheckedContinuation { continuation in
+                liveBeginContinuation = continuation
+            }
+        }
         liveDictationSessionID = sessionID
         onPartial("live partial")
     }
@@ -1077,6 +1121,26 @@ private actor MockSTTRuntime: STTRuntimeProtocol {
     func resumeLiveFinish() {
         liveFinishContinuation?.resume()
         liveFinishContinuation = nil
+    }
+
+    var hasActiveLiveDictationSession: Bool {
+        liveDictationSessionID != nil
+    }
+
+    func blockNextLiveBegin() {
+        shouldBlockNextLiveBegin = true
+    }
+
+    func waitForLiveBeginStart() async {
+        guard liveBeginStartedCount == 0 else { return }
+        await withCheckedContinuation { continuation in
+            liveBeginStartContinuation = continuation
+        }
+    }
+
+    func resumeLiveBegin() {
+        liveBeginContinuation?.resume()
+        liveBeginContinuation = nil
     }
 
     func warmUp(onProgress: (@Sendable (String) -> Void)?) async throws {

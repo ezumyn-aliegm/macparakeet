@@ -39,6 +39,8 @@ public actor MockSTTClient: STTClientProtocol, SpeechEngineRoutedTranscribing, S
     private var queuedTranscribeErrors: [Error] = []
     private var liveSessionID: UUID?
     private var livePartialHandler: (@Sendable (String) -> Void)?
+    private var liveAppendsHeld = false
+    private var liveAppendHoldContinuations: [CheckedContinuation<Void, Never>] = []
 
     public init() {}
 
@@ -133,6 +135,7 @@ public actor MockSTTClient: STTClientProtocol, SpeechEngineRoutedTranscribing, S
         liveAppendedSamples = []
         liveSessionID = nil
         livePartialHandler = nil
+        releaseLiveAppends()
     }
 
     public func beginLiveDictationTranscription(
@@ -157,8 +160,28 @@ public actor MockSTTClient: STTClientProtocol, SpeechEngineRoutedTranscribing, S
         }
         liveAppendCallCount += 1
         liveAppendedSamples.append(samples)
+        if liveAppendsHeld {
+            await withCheckedContinuation { continuation in
+                liveAppendHoldContinuations.append(continuation)
+            }
+        }
         if let liveAppendError {
             throw liveAppendError
+        }
+    }
+
+    /// Suspend every subsequent live append until `releaseLiveAppends()` —
+    /// lets tests overflow the service's live sample stream deterministically.
+    public func holdLiveAppends() {
+        liveAppendsHeld = true
+    }
+
+    public func releaseLiveAppends() {
+        liveAppendsHeld = false
+        let waiters = liveAppendHoldContinuations
+        liveAppendHoldContinuations = []
+        for waiter in waiters {
+            waiter.resume()
         }
     }
 

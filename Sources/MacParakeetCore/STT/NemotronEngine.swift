@@ -152,10 +152,14 @@ public actor NemotronEngine: STTTranscribing {
 
     public func cancelLiveDictation() async {
         let lane: NemotronRuntimeLane = .interactive
-        guard let manager = manager(for: lane),
-              activeLanes.contains(lane) else { return }
-        await manager.setPartialCallback { _ in }
-        await manager.reset()
+        guard activeLanes.contains(lane) else { return }
+        // Release the lane even if unload() already dropped the manager —
+        // otherwise a cancel that races shutdown would leave the interactive
+        // lane claimed forever on this engine instance.
+        if let manager = manager(for: lane) {
+            await manager.setPartialCallback { _ in }
+            await manager.reset()
+        }
         liveDictationLanguage = nil
         endTranscription(on: lane)
     }

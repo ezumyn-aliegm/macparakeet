@@ -7,7 +7,7 @@ import Foundation
 ///   bypassing the process-wide singleton that ADR-016 requires.
 ///   **App code must never instantiate this type directly.**
 ///   Use the shared ``STTScheduler`` from `AppEnvironment` instead.
-public actor STTClient: STTManaging, SpeechEngineRoutedTranscribing, STTLiveDictationTranscribing, SpeechEngineSwitching, SpeechEngineSwitchAvailabilityProviding, SpeechEngineSessionManaging {
+public actor STTClient: STTManaging, SpeechEngineRoutedTranscribing, SpeechEngineSwitching, SpeechEngineSwitchAvailabilityProviding, SpeechEngineSessionManaging {
     private let scheduler: STTScheduler
 
     public init(
@@ -51,24 +51,6 @@ public actor STTClient: STTManaging, SpeechEngineRoutedTranscribing, STTLiveDict
 
     public func warmUp(onProgress: (@Sendable (String) -> Void)?) async throws {
         try await scheduler.warmUp(onProgress: onProgress)
-    }
-
-    public func beginLiveDictationTranscription(
-        onPartial: @escaping @Sendable (String) -> Void
-    ) async throws -> UUID {
-        try await scheduler.beginLiveDictationTranscription(onPartial: onPartial)
-    }
-
-    public func appendLiveDictationSamples(_ samples: [Float], sessionID: UUID) async throws {
-        try await scheduler.appendLiveDictationSamples(samples, sessionID: sessionID)
-    }
-
-    public func finishLiveDictationTranscription(sessionID: UUID) async throws -> STTResult {
-        try await scheduler.finishLiveDictationTranscription(sessionID: sessionID)
-    }
-
-    public func cancelLiveDictationTranscription(sessionID: UUID) async {
-        await scheduler.cancelLiveDictationTranscription(sessionID: sessionID)
     }
 
     public func backgroundWarmUp() async {

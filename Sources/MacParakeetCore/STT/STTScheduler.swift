@@ -67,7 +67,17 @@ public actor STTScheduler: STTManaging, SpeechEngineRoutedTranscribing, STTLiveD
     private var acceptsNewJobs = true
     private var activeSpeechEngineSessionIDs: Set<UUID> = []
     private var speechEngineSwitchTask: Task<Void, Error>?
-    private var liveDictationSession: LiveDictationSessionState?
+    private var liveDictationSession: LiveDictationSessionState? {
+        didSet {
+            guard liveDictationSession == nil, !liveDictationSessionWaiters.isEmpty else { return }
+            let waiters = liveDictationSessionWaiters
+            liveDictationSessionWaiters = []
+            for waiter in waiters {
+                waiter.resume()
+            }
+        }
+    }
+    private var liveDictationSessionWaiters: [CheckedContinuation<Void, Never>] = []
 
     /// - Parameter meetingLiveChunkBacklogLimit: Maximum pending live-preview chunks before the
     ///   oldest is dropped. 120 ≈ 4 minutes of dual-source 5-second chunks emitted every ~4
@@ -180,6 +190,15 @@ public actor STTScheduler: STTManaging, SpeechEngineRoutedTranscribing, STTLiveD
                 sessionID: id,
                 onPartial: onPartial
             )
+            // A quiesce (engine switch, shutdown, cache clear) may have run
+            // while runtime.begin was in flight; its runtime-level cancel was
+            // a no-op because the runtime session did not exist yet. If our
+            // reservation is gone, unwind the runtime session we just created
+            // or it would be orphaned and block the interactive lane forever.
+            guard liveDictationSession == .active(id) else {
+                await runtime.cancelLiveDictationTranscription(sessionID: id)
+                throw STTSchedulerError.unavailable
+            }
             return id
         } catch {
             if liveDictationSession?.id == id {
@@ -571,7 +590,9 @@ public actor STTScheduler: STTManaging, SpeechEngineRoutedTranscribing, STTLiveD
 
     private func waitForLiveDictationSessionToEnd() async {
         while liveDictationSession != nil {
-            await Task.yield()
+            await withCheckedContinuation { continuation in
+                liveDictationSessionWaiters.append(continuation)
+            }
         }
     }
 

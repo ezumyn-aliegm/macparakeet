@@ -424,16 +424,7 @@ struct DictationOverlayView: View {
                     .frame(width: 64)
             }
 
-            if let liveTranscriptPreview {
-                Text(liveTranscriptPreview)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.76))
-                    .lineLimit(2)
-                    .truncationMode(.head)
-                    .multilineTextAlignment(.leading)
-                    .frame(width: 220, alignment: .leading)
-                    .transition(.opacity.animation(.easeInOut(duration: 0.16)))
-            }
+            liveTranscriptPreviewText(width: 220)
         }
     }
 
@@ -456,6 +447,20 @@ struct DictationOverlayView: View {
         guard !compact.isEmpty else { return nil }
         if compact.count <= 180 { return compact }
         return String(compact.suffix(180))
+    }
+
+    @ViewBuilder
+    private func liveTranscriptPreviewText(width: CGFloat) -> some View {
+        if let liveTranscriptPreview {
+            Text(liveTranscriptPreview)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.white.opacity(0.76))
+                .lineLimit(2)
+                .truncationMode(.head)
+                .multilineTextAlignment(.leading)
+                .frame(width: width, alignment: .leading)
+                .transition(.opacity.animation(.easeInOut(duration: 0.16)))
+        }
     }
 
     private var recordingContent: some View {
@@ -498,16 +503,7 @@ struct DictationOverlayView: View {
                 .animation(.easeInOut(duration: 0.15), value: isStopHovered)
             }
 
-            if let liveTranscriptPreview {
-                Text(liveTranscriptPreview)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.76))
-                    .lineLimit(2)
-                    .truncationMode(.head)
-                    .multilineTextAlignment(.leading)
-                    .frame(width: 270, alignment: .leading)
-                    .transition(.opacity.animation(.easeInOut(duration: 0.16)))
-            }
+            liveTranscriptPreviewText(width: 270)
         }
     }
 

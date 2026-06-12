@@ -83,7 +83,17 @@ public actor STTRuntime: STTRuntimeProtocol {
     private let whisperModelVariant: String
     private let defaults: UserDefaults
     private var activeTranscriptionCount = 0
-    private var liveDictationSession: LiveDictationSessionState?
+    private var liveDictationSession: LiveDictationSessionState? {
+        didSet {
+            guard liveDictationSession == nil, !liveDictationSessionWaiters.isEmpty else { return }
+            let waiters = liveDictationSessionWaiters
+            liveDictationSessionWaiters = []
+            for waiter in waiters {
+                waiter.resume()
+            }
+        }
+    }
+    private var liveDictationSessionWaiters: [CheckedContinuation<Void, Never>] = []
 
     private var backgroundWarmUpState: STTWarmUpState = .idle
     private var backgroundWarmUpTask: Task<Void, Never>?
@@ -511,7 +521,9 @@ public actor STTRuntime: STTRuntimeProtocol {
 
     private func waitForLiveDictationSessionToEnd() async {
         while liveDictationSession != nil {
-            await Task.yield()
+            await withCheckedContinuation { continuation in
+                liveDictationSessionWaiters.append(continuation)
+            }
         }
     }
 

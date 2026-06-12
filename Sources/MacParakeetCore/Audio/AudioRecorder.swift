@@ -423,6 +423,11 @@ public actor AudioRecorder {
         do {
             if !preRollSamples.isEmpty {
                 try writePreRollSamples(preRollSamples, to: file, format: outputFormat)
+                // Mirror the pre-roll into the live STT stream so live text
+                // covers the same leading audio as the WAV. If the pre-roll
+                // is later discarded (media playing, issue #474), the
+                // dictation service degrades the live session instead.
+                sampleSink?.onSamples(preRollSamples)
             }
         } catch {
             try? FileManager.default.removeItem(at: url)

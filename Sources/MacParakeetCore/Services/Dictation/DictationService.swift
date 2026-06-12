@@ -1,4 +1,5 @@
 import Foundation
+import os
 import OSLog
 
 public enum DictationState: Sendable {
@@ -55,7 +56,19 @@ private struct LiveDictationTranscriptionState: Sendable {
     let dictationSessionID: Int
     let sttSessionID: UUID
     let sampleContinuation: AsyncStream<[Float]>.Continuation
+    let partialContinuation: AsyncStream<String>.Continuation
     let task: Task<STTResult, Error>
+    /// Set when the live stream is no longer a faithful rendition of the
+    /// recorded WAV (backpressure dropped samples, or the pre-roll was
+    /// discarded from the file after being streamed). A degraded session's
+    /// final text is discarded and the recorded file is transcribed instead.
+    let degradeReason: OSAllocatedUnfairLock<String?>
+
+    func markDegraded(reason: String) {
+        degradeReason.withLock { current in
+            if current == nil { current = reason }
+        }
+    }
 }
 
 public enum AIFormatterAppContextPhase: Sendable {
@@ -488,6 +501,13 @@ public actor DictationService: DictationServiceProtocol {
             )
             return
         }
+        // The pre-roll was already mirrored into the live STT stream, but the
+        // recorder will now trim it from the WAV. The live final would keep
+        // the discarded media audio, so it can no longer stand in for the
+        // recorded file.
+        if let state = liveTranscriptionState, state.dictationSessionID == activeSessionID {
+            state.markDegraded(reason: "preroll_discarded")
+        }
         await audioProcessor.discardPreRollForActiveCapture()
     }
 
@@ -705,11 +725,28 @@ public actor DictationService: DictationServiceProtocol {
         }
         guard let sampleContinuation = continuation else { return nil }
 
+        // Partials are serialized through a single consumer so a stale
+        // partial can never land after a newer one (unstructured Tasks have
+        // no ordering guarantee). Only the latest partial matters.
+        var partialStreamContinuation: AsyncStream<String>.Continuation?
+        let partialStream = AsyncStream<String>(bufferingPolicy: .bufferingNewest(1)) {
+            partialStreamContinuation = $0
+        }
+        guard let partialContinuation = partialStreamContinuation else {
+            sampleContinuation.finish()
+            return nil
+        }
+        Task { [weak self] in
+            for await partial in partialStream {
+                await self?.updateLiveTranscript(partial, sessionID: sessionID)
+            }
+        }
+
+        let degradeReason = OSAllocatedUnfairLock<String?>(initialState: nil)
+
         do {
-            let sttSessionID = try await liveTranscriber.beginLiveDictationTranscription { [weak self] partial in
-                Task {
-                    await self?.updateLiveTranscript(partial, sessionID: sessionID)
-                }
+            let sttSessionID = try await liveTranscriber.beginLiveDictationTranscription { partial in
+                partialContinuation.yield(partial)
             }
             let task = Task { [liveTranscriber, sttSessionID] in
                 do {
@@ -736,13 +773,22 @@ public actor DictationService: DictationServiceProtocol {
                 dictationSessionID: sessionID,
                 sttSessionID: sttSessionID,
                 sampleContinuation: sampleContinuation,
-                task: task
+                partialContinuation: partialContinuation,
+                task: task,
+                degradeReason: degradeReason
             )
             AudioCaptureDiagnostics.append("dictation_live_transcribe_started engine=nemotron")
             return DictationAudioSampleSink(
                 onSamples: { samples in
                     guard !samples.isEmpty else { return }
-                    sampleContinuation.yield(samples)
+                    if case .dropped = sampleContinuation.yield(samples) {
+                        // The recorded WAV keeps every sample; the live stream
+                        // just lost some, so its final text can no longer be
+                        // trusted as the dictation result.
+                        degradeReason.withLock { current in
+                            if current == nil { current = "backpressure_drop" }
+                        }
+                    }
                 },
                 onFinish: {
                     sampleContinuation.finish()
@@ -750,6 +796,7 @@ public actor DictationService: DictationServiceProtocol {
             )
         } catch {
             sampleContinuation.finish()
+            partialContinuation.finish()
             AudioCaptureDiagnostics.append(
                 "dictation_live_transcribe_skipped \(AudioCaptureDiagnostics.errorFields(error))"
             )
@@ -772,9 +819,32 @@ public actor DictationService: DictationServiceProtocol {
         }
         liveTranscriptionState = nil
         state.sampleContinuation.finish()
+        state.partialContinuation.finish()
+
+        // Capture stopped before this runs, so no further degrade writes can
+        // race this read.
+        if let reason = state.degradeReason.withLock({ $0 }) {
+            AudioCaptureDiagnostics.append(
+                "dictation_live_transcribe_degraded reason=\(reason)"
+            )
+            state.task.cancel()
+            if let liveTranscriber = sttTranscriber as? any STTLiveDictationTranscribing {
+                await liveTranscriber.cancelLiveDictationTranscription(sessionID: state.sttSessionID)
+            }
+            _ = await state.task.result
+            return nil
+        }
 
         do {
             let result = try await state.task.value
+            let trimmedText = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedText.isEmpty else {
+                // An empty live final is indistinguishable from a streaming
+                // hiccup; let the recorded file decide whether the dictation
+                // was really empty before it is silently dismissed.
+                AudioCaptureDiagnostics.append("dictation_live_transcribe_empty_fallback")
+                return nil
+            }
             AudioCaptureDiagnostics.append(
                 "dictation_live_transcribe_complete chars=\(result.text.count)"
             )
@@ -798,6 +868,7 @@ public actor DictationService: DictationServiceProtocol {
         liveTranscriptionState = nil
         liveTranscriptText = ""
         state.sampleContinuation.finish()
+        state.partialContinuation.finish()
         state.task.cancel()
         if let liveTranscriber = sttTranscriber as? any STTLiveDictationTranscribing {
             await liveTranscriber.cancelLiveDictationTranscription(sessionID: state.sttSessionID)
