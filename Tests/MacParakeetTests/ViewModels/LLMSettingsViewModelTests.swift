@@ -189,7 +189,7 @@ final class LLMSettingsViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.modelName, "gemini-3.5-flash")
 
         viewModel.selectedProviderID = .ollama
-        XCTAssertEqual(viewModel.modelName, "qwen3.5:4b")
+        XCTAssertEqual(viewModel.modelName, "qwen3:8b")
     }
 
     func testOllamaDoesNotRequireAPIKey() {
@@ -1106,7 +1106,7 @@ final class LLMSettingsViewModelTests: XCTestCase {
 
         XCTAssertEqual(viewModel.availableModels, LLMSettingsViewModel.suggestedModels(for: .ollama))
         XCTAssertFalse(viewModel.useCustomModel)
-        XCTAssertEqual(viewModel.modelName, "qwen3.5:4b")
+        XCTAssertEqual(viewModel.modelName, "qwen3:8b")
         XCTAssertEqual(viewModel.modelListErrorMessage, "Connection failed: Failed to fetch models.")
     }
 

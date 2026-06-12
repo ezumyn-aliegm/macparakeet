@@ -138,8 +138,11 @@ final class LocalCLIExecutorTests: XCTestCase {
             LocalCLITemplate.codex.defaultCommand,
             "codex exec --skip-git-repo-check --model gpt-5.4-mini"
         )
+        XCTAssertTrue(LocalCLITemplate.grokBuild.defaultCommand.contains("grok --verbatim --prompt-file"))
+        XCTAssertFalse(LocalCLITemplate.grokBuild.defaultCommand.contains("status=$?"))
         XCTAssertEqual(LocalCLITemplate.claudeCode.displayName, "Claude Code")
         XCTAssertEqual(LocalCLITemplate.codex.displayName, "Codex")
+        XCTAssertEqual(LocalCLITemplate.grokBuild.displayName, "Grok Build")
     }
 
     func testTemplateInferenceAndDisplayNames() {
@@ -151,8 +154,13 @@ final class LocalCLIExecutorTests: XCTestCase {
             LocalCLITemplate.inferredTemplate(for: "codex exec --model gpt-5.4"),
             .codex
         )
+        XCTAssertEqual(
+            LocalCLITemplate.inferredTemplate(for: "grok --verbatim --prompt-file /tmp/p"),
+            .grokBuild
+        )
         XCTAssertNil(LocalCLITemplate.inferredTemplate(for: "my-wrapper --run codex"))
         XCTAssertEqual(LocalCLITemplate.displayName(for: "codex exec --model gpt-5.4"), "Codex")
+        XCTAssertEqual(LocalCLITemplate.displayName(for: "grok --verbatim --prompt-file /tmp/p"), "Grok Build")
         XCTAssertEqual(LocalCLITemplate.displayName(for: "python llm_wrapper.py"), "Custom CLI")
     }
 

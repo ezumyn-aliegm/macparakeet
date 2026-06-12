@@ -5,6 +5,19 @@
 > people running them) that want to *call* `macparakeet-cli` to add local STT
 > to their stack.
 
+## Personal fork (local voice notes)
+
+This repo is a personal MacParakeet fork (Ollama @ Mac Mini, Grok Local CLI).
+To build and install `/Applications/MacParakeet.app`:
+
+```bash
+./scripts/dev/update_local_fork.sh
+```
+
+See [`local-setup.md`](./local-setup.md) for permissions, AI routing, troubleshooting,
+and [`local-voice-notes/SKILL.md`](./local-voice-notes/SKILL.md) for agent workflows.
+Dev script index: [`scripts/dev/README.md`](../scripts/dev/README.md).
+
 ## Scope of the CLI
 
 The CLI is a first-class automation surface, **not a GUI mirror.** It intentionally

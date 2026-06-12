@@ -960,7 +960,7 @@ final class LLMClientTests: XCTestCase {
         let config = LLMProviderConfig.ollama(model: "qwen3.5:4b")
         let models = try await llmClient.listModels(config: config)
 
-        XCTAssertEqual(capturedRequest?.url?.absoluteString, "http://localhost:11434/api/tags")
+        XCTAssertEqual(capturedRequest?.url?.absoluteString, "http://192.168.1.100:11434/api/tags")
         XCTAssertEqual(capturedRequest?.httpMethod, "GET")
         XCTAssertEqual(models, ["gemma3:4b", "qwen3.5:4b"])
     }
@@ -1010,8 +1010,8 @@ final class LLMClientTests: XCTestCase {
         XCTAssertEqual(
             capturedURLs,
             [
-                "http://localhost:11434/api/tags",
-                "http://localhost:11434/v1/models",
+                "http://192.168.1.100:11434/api/tags",
+                "http://192.168.1.100:11434/v1/models",
             ]
         )
         XCTAssertEqual(models, ["qwen3.5:4b"])

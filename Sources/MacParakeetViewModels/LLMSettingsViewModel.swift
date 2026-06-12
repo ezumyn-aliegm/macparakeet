@@ -1262,6 +1262,11 @@ public final class LLMSettingsViewModel {
     }
 
     static func defaultBaseURL(for provider: LLMProviderID) -> String {
-        provider.defaultBaseURL
+        switch provider {
+        case .ollama:
+            return OllamaEndpointResolver.preferredBaseURL()
+        default:
+            return provider.defaultBaseURL
+        }
     }
 }

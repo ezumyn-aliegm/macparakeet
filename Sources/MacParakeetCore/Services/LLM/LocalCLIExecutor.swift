@@ -28,11 +28,13 @@ public struct LocalCLIConfig: Codable, Sendable, Equatable {
 public enum LocalCLITemplate: String, CaseIterable, Sendable, Codable {
     case claudeCode
     case codex
+    case grokBuild
 
     public var displayName: String {
         switch self {
         case .claudeCode: return "Claude Code"
         case .codex: return "Codex"
+        case .grokBuild: return "Grok Build"
         }
     }
 
@@ -40,6 +42,9 @@ public enum LocalCLITemplate: String, CaseIterable, Sendable, Codable {
         switch self {
         case .claudeCode: return "claude -p --model haiku"
         case .codex: return "codex exec --skip-git-repo-check --model gpt-5.4-mini"
+        case .grokBuild:
+            // Use `rc` not `status` — zsh treats `status` as read-only.
+            return "tmp=$(mktemp); cat > \"$tmp\"; grok --verbatim --prompt-file \"$tmp\"; rc=$?; rm -f \"$tmp\"; exit $rc"
         }
     }
 
@@ -54,6 +59,9 @@ public enum LocalCLITemplate: String, CaseIterable, Sendable, Codable {
         }
         if trimmed == "codex" || trimmed.hasPrefix("codex ") {
             return .codex
+        }
+        if trimmed == "grok" || trimmed.hasPrefix("grok ") {
+            return .grokBuild
         }
         return nil
     }

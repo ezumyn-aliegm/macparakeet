@@ -156,20 +156,21 @@ public enum LLMProviderID: String, Codable, Sendable, CaseIterable {
             return LLMProviderDescriptor(
                 id: self,
                 displayName: "Ollama",
-                defaultBaseURL: "http://localhost:11434/v1",
+                defaultBaseURL: OllamaEndpointResolver.preferredBaseURL(),
                 isLocal: true,
                 supportsAPIKey: false,
                 requiresAPIKey: false,
                 requiresCustomEndpoint: false,
                 modelListEndpoint: .ollama,
-                defaultModelName: "qwen3.5:4b",
+                defaultModelName: "qwen3:8b",
                 fallbackModels: [
+                    "qwen3:8b",
+                    "gemma4:e4b",
                     "qwen3.5:4b",
                     "qwen3.5:9b",
                     "llama4:8b",
                     "gemma3:4b",
                     "deepseek-v3.2",
-                    "qwen3:8b",
                     "mistral",
                 ]
             )
@@ -358,7 +359,7 @@ public struct LLMProviderConfig: Codable, Sendable, Equatable {
     ) -> LLMProviderConfig {
         LLMProviderConfig(
             id: .ollama,
-            baseURL: baseURL ?? URL(string: LLMProviderID.ollama.defaultBaseURL)!,
+            baseURL: baseURL ?? URL(string: OllamaEndpointResolver.preferredBaseURL())!,
             apiKey: nil,
             modelName: model,
             isLocal: true
